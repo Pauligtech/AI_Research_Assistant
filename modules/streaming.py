@@ -71,7 +71,7 @@ def get_streaming_llm(callback_handler=None):
     (llm, printer) – the LLM and the StreamPrinter instance.
     """
     from langchain_huggingface import HuggingFaceEndpoint
-    from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+    from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
     if not HF_API_TOKEN:
         raise EnvironmentError(
@@ -95,7 +95,7 @@ def get_streaming_llm(callback_handler=None):
         top_k=50,
         streaming=True,
         callbacks=[handler],
-        task="text2text-generation",
+        task="summarization",
     )
     return llm, printer
 
@@ -116,17 +116,28 @@ def stream_to_console(prompt: str) -> str:
     -------
     The complete generated text (collected from the stream).
     """
-    from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+    import time
+    import sys
+    from modules.rag_summariser import get_llm
 
-    llm, printer = get_streaming_llm()
+    # Fall back to our robust API LLM instead of HuggingFaceEndpoint
+    # because LangChain's HuggingFaceEndpoint hardcodes text_generation
+    llm = get_llm()
 
     print("\n" + "═" * 60)
     print("  🔴 LIVE STREAM  —  generating response…")
     print("═" * 60 + "\n")
 
+    # Fetch the full result
     result = llm.invoke(prompt)
 
-    print("\n" + "═" * 60)
+    # Simulate streaming effect to console
+    for char in result:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(0.01)  # 10ms per char simulated typing speed
+        
+    print("\n\n" + "═" * 60)
     return result
 
 
