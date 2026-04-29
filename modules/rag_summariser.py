@@ -56,6 +56,8 @@ class ApiLLM(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs,
     ) -> str:
+        import time
+
         url     = f"{HF_ROUTER_BASE}/{self.model_id}"
         headers = {
             "Authorization": f"Bearer {self.api_token}",
@@ -75,17 +77,38 @@ class ApiLLM(LLM):
 
         payload = {"inputs": text}
 
-        logger.info(f"[RAG] POST {self.model_id}")
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        # Retry up to 3 times with exponential backoff (handles timeouts & 502/503)
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            logger.info(f"[RAG] POST {self.model_id} (attempt {attempt}/{max_retries})")
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries:
+                    raise RuntimeError(f"API request failed after {max_retries} attempts: {e}")
+                wait = 2 ** attempt
+                print(f"  ⚠  Network/Timeout error, retrying in {wait}s…")
+                time.sleep(wait)
+                continue
 
-        if resp.status_code == 503:
-            raise RuntimeError("Model loading, wait 20s and retry.")
-        resp.raise_for_status()
+            if resp.status_code in (502, 503):
+                if attempt == max_retries:
+                    raise RuntimeError(
+                        f"HuggingFace server error ({resp.status_code}) after "
+                        f"{max_retries} attempts. Try again in a minute."
+                    )
+                wait = 2 ** attempt
+                print(f"  ⚠  Server {resp.status_code}, retrying in {wait}s…")
+                time.sleep(wait)
+                continue
 
-        result = resp.json()
-        if isinstance(result, list) and result:
-            return result[0].get("summary_text", str(result[0]))
-        return str(result)
+            resp.raise_for_status()
+            result = resp.json()
+            if isinstance(result, list) and result:
+                return result[0].get("summary_text", str(result[0]))
+            return str(result)
+
+        return "Summary unavailable — HuggingFace server did not respond."
 
 
 def get_llm(streaming: bool = False) -> ApiLLM:
